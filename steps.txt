@@ -1,0 +1,43 @@
+AIC8800D80 WiFi + Bluetooth — Post-Reboot Steps
+================================================
+
+1. Verify you're on the right kernel:
+   uname -r
+   (should show: 7.0.9-202.fc44.x86_64)
+
+2. Load the modules:
+   sudo modprobe aic_load_fw && sudo modprobe aic8800_fdrv
+
+3. Verify modules loaded:
+   lsmod | grep aic
+
+4. Plug in the USB WiFi adapter (if not already plugged in).
+
+5. Check WiFi interface appeared:
+   iwconfig
+
+6. Check kernel log for errors:
+   sudo dmesg | grep -i aic
+
+--- Bluetooth ---
+
+7. Bluetooth loads automatically via softdep when the adapter is plugged in.
+   Check if BT interface appeared:
+   hciconfig -a
+
+8. If BT not detected, load manually:
+   sudo modprobe aic_btusb
+
+--- Troubleshooting ---
+
+- If modprobe fails: sudo dmesg | tail -30
+- If WiFi interface missing after modprobe: sudo dmesg | grep -i aic
+- To unload: sudo modprobe -r aic8800_fdrv && sudo modprobe -r aic_load_fw
+
+--- Installed locations ---
+
+Modules:  /lib/modules/7.0.9-202.fc44.x86_64/kernel/drivers/net/wireless/aic8800/
+Firmware: /lib/firmware/aic8800D80/  (and aic8800DC, aic8800, aic8800D80N, aic8800D80X2, aic8800DLN)
+Modprobe: /etc/modprobe.d/aic8800-bt.conf
+Udev:     /lib/udev/rules.d/aic.rules
+Source:   /home/bhanu/Downloads/aic8800d80/

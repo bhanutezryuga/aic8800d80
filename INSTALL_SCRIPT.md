@@ -16,7 +16,7 @@ This automated installation script (`install.sh`) simplifies the process of inst
 
 ```bash
 # Clone the repository and download the script, make the script executable
-git clone https://github.com/shenmintao/aic8800d80.git && cd aic8800d80 && chmod +x install.sh
+git clone -b bluetooth https://github.com/shenmintao/aic8800d80.git && cd aic8800d80 && chmod +x install.sh
 
 # Run the installation
 sudo ./install.sh

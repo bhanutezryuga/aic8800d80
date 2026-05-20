@@ -267,10 +267,17 @@ install_firmware() {
         fi
     done
 
+    print_success "Firmware installed for all chip variants:"
+    print_info "  - aic8800D80 (standard)"
+    print_info "  - aic8800D80N (N variant)"
+    print_info "  - aic8800D80X2 (X2 variant)"
+    print_info "  - aic8800DC/DW (DC/DW series)"
+    print_info "  - aic8800DLN (DLN variant)"
+    
     # Install udev rules
     local rules_source="${SCRIPT_DIR}/aic.rules"
     local rules_dest="/usr/lib/udev/rules.d/aic.rules"
-
+    
     if [ -f "$rules_source" ]; then
         print_info "Installing udev rules to $rules_dest..."
         cp "$rules_source" "$rules_dest" >> "$LOG_FILE" 2>&1
@@ -281,11 +288,23 @@ install_firmware() {
     else
         print_warning "Udev rules file not found: $rules_source"
     fi
-
-    # Install usb_modeswitch configuration for AIC8800D80 "Pandora" clone
+    
+    # Install modprobe configuration for Bluetooth
+    local modprobe_source="${SCRIPT_DIR}/modprobe/aic8800-bt.conf"
+    local modprobe_dest="/etc/modprobe.d/aic8800-bt.conf"
+    
+    if [ -f "$modprobe_source" ]; then
+        print_info "Installing modprobe configuration to $modprobe_dest..."
+        cp "$modprobe_source" "$modprobe_dest" >> "$LOG_FILE" 2>&1
+        print_success "Modprobe configuration installed successfully."
+    else
+        print_warning "Modprobe configuration file not found: $modprobe_source"
+    fi
+    
+    # Install usb_modeswitch configuration
     local modeswitch_source="${SCRIPT_DIR}/usb_modeswitch/1111_1111"
     local modeswitch_dest="/etc/usb_modeswitch.d/1111:1111"
-
+    
     if [ -f "$modeswitch_source" ]; then
         print_info "Installing usb_modeswitch configuration to $modeswitch_dest..."
         mkdir -p /etc/usb_modeswitch.d >> "$LOG_FILE" 2>&1 || true
@@ -294,7 +313,7 @@ install_firmware() {
     else
         print_warning "USB modeswitch configuration file not found: $modeswitch_source"
     fi
-
+    
     print_success "Firmware installed successfully."
 }
 
@@ -394,22 +413,21 @@ install_via_dkms() {
 #############################################################################
 
 load_module() {
-    print_step "Loading kernel module..."
+    print_step "Loading kernel modules..."
     
     # Update module dependencies
     print_info "Updating module dependencies..."
     depmod -a >> "$LOG_FILE" 2>&1
     
-    # Unload module if already loaded
     if lsmod | grep -q "$MODULE_NAME"; then
-        print_info "Module already loaded. Reloading..."
+        print_info "WiFi module already loaded. Reloading..."
         modprobe -r "$MODULE_NAME" >> "$LOG_FILE" 2>&1 || true
     fi
     
-    # Load the module
+    # Load the WiFi module
     print_info "Loading $MODULE_NAME..."
     if modprobe "$MODULE_NAME" >> "$LOG_FILE" 2>&1; then
-        print_success "Module loaded successfully."
+        print_success "WiFi module loaded successfully."
         
         # Verify module is loaded
         print_info "Waiting for module to initialize..."
@@ -423,14 +441,24 @@ load_module() {
         done
         
         if [ "$module_loaded" = true ]; then
-            print_success "Module is active in kernel."
+            print_success "WiFi module is active in kernel."
         else
-            print_warning "Module may not be fully initialized yet."
+            print_warning "WiFi module may not be fully initialized yet."
         fi
     else
-        print_warning "Module installed but could not be loaded immediately."
+        print_warning "WiFi module installed but could not be loaded immediately."
         print_info "This may be due to Secure Boot or missing hardware."
         print_info "Try rebooting or check: sudo dmesg | grep aic8800"
+    fi
+    
+    # Load the standard Bluetooth driver (btusb)
+    # The aic_load_fw module uploads the Bluetooth firmware, then btusb handles the BT interface
+    print_info "Loading standard Bluetooth driver (btusb)..."
+    if modprobe btusb >> "$LOG_FILE" 2>&1; then
+        print_success "Bluetooth driver (btusb) loaded successfully."
+    else
+        print_warning "Could not load btusb driver automatically."
+        print_info "You can manually load it with: sudo modprobe btusb"
     fi
 }
 
@@ -451,14 +479,24 @@ verify_installation() {
         print_warning "DKMS status unclear: $dkms_status"
     fi
     
-    # Check if module is loaded
+    # Check if WiFi module is loaded
     if lsmod | grep -q "$MODULE_NAME"; then
-        print_success "Kernel module is loaded."
-        echo ""
-        lsmod | grep aic
+        print_success "WiFi kernel module is loaded."
     else
-        print_info "Module not currently loaded (this is OK if no hardware is connected)."
+        print_info "WiFi module not currently loaded (this is OK if no hardware is connected)."
     fi
+    
+    # Check if Bluetooth is available via standard btusb
+    if lsmod | grep -q "btusb"; then
+        print_success "Bluetooth kernel module (btusb) is loaded."
+    else
+        print_info "Bluetooth module (btusb) not currently loaded (this is OK if no hardware is connected)."
+    fi
+    
+    # Show all loaded AIC modules
+    echo ""
+    print_info "Loaded AIC modules:"
+    lsmod | grep aic || echo "  (none)"
     
     # Check firmware
     local fw_count=0
@@ -472,11 +510,21 @@ verify_installation() {
     else
         print_warning "No firmware found in /lib/firmware/"
     fi
-
+    
     # Check for wireless interfaces
     print_info "Checking for wireless interfaces..."
     if command -v iwconfig &> /dev/null; then
         iwconfig 2>/dev/null | grep -E "wlan|IEEE" || echo "No wireless interfaces detected (hardware may not be connected)"
+    fi
+    
+    # Check for Bluetooth interfaces
+    print_info "Checking for Bluetooth interfaces..."
+    if command -v hciconfig &> /dev/null; then
+        hciconfig 2>/dev/null || echo "No Bluetooth interfaces detected (hardware may not be connected)"
+    elif command -v bluetoothctl &> /dev/null; then
+        bluetoothctl list 2>/dev/null || echo "No Bluetooth interfaces detected (hardware may not be connected)"
+    else
+        echo "Bluetooth tools not installed (install bluez package for Bluetooth support)"
     fi
 }
 
@@ -492,13 +540,14 @@ show_final_instructions() {
     echo ""
     echo -e "${CYAN}Important Information:${NC}"
     echo ""
-    echo "✓ Driver installed via DKMS"
+    echo "✓ WiFi driver installed via DKMS"
+    echo "✓ Bluetooth supported via standard btusb driver (after firmware upload)"
     echo "✓ Automatic rebuild enabled for kernel updates"
     echo "✓ Firmware installed in /lib/firmware/"
     echo ""
     echo -e "${CYAN}Next Steps:${NC}"
     echo ""
-    echo "1. Connect your AIC8800D80 USB WiFi adapter"
+    echo "1. Connect your AIC8800D80 USB WiFi/Bluetooth adapter"
     echo ""
     echo "2. Check if the adapter is detected:"
     echo "   ${BLUE}lsusb | grep -i aic${NC}"
@@ -507,10 +556,15 @@ show_final_instructions() {
     echo ""
     echo "3. View kernel messages about the driver:"
     echo "   ${BLUE}sudo dmesg | grep aic8800${NC}"
+    echo "   ${BLUE}sudo dmesg | grep btusb${NC}"
     echo ""
     echo "4. Connect to a WiFi network:"
     echo "   ${BLUE}nmcli device wifi list${NC}"
     echo "   ${BLUE}nmcli device wifi connect \"SSID\" password \"PASSWORD\"${NC}"
+    echo ""
+    echo "5. Check Bluetooth status:"
+    echo "   ${BLUE}bluetoothctl show${NC}"
+    echo "   ${BLUE}bluetoothctl scan on${NC}"
     echo ""
     echo -e "${CYAN}Troubleshooting:${NC}"
     echo ""
@@ -518,21 +572,23 @@ show_final_instructions() {
     echo "  ${BLUE}dkms status${NC}"
     echo ""
     echo "• Check loaded modules:"
-    echo "  ${BLUE}lsmod | grep aic8800${NC}"
+    echo "  ${BLUE}lsmod | grep aic${NC}"
     echo ""
-    echo "• Manually load the module:"
+    echo "• Manually load the WiFi module:"
     echo "  ${BLUE}sudo modprobe aic8800_fdrv${NC}"
+    echo ""
+    echo "• Manually load the Bluetooth module:"
+    echo "  ${BLUE}sudo modprobe btusb${NC}"
     echo ""
     echo "• View detailed logs:"
     echo "  ${BLUE}cat $LOG_FILE${NC}"
     echo ""
     echo -e "${YELLOW}Known Limitations:${NC}"
-    echo "• Bluetooth functionality is not supported"
     echo "• Secure Boot may prevent module loading (disable in BIOS if needed)"
     echo ""
     echo -e "${CYAN}Uninstallation:${NC}"
     echo "  ${BLUE}sudo dkms remove ${DRV_NAME}/${DRV_VERSION} --all${NC}"
-    echo "  ${BLUE}sudo rm -rf /lib/firmware/aic8800D80${NC}"
+    echo "  ${BLUE}sudo rm -rf /lib/firmware/aic8800*${NC}"
     echo ""
 }
 
