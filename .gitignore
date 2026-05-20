@@ -4,10 +4,13 @@ CLAUDE.md
 # Build artifacts
 *.o
 *.ko
+*.ko.unsigned
 *.mod
 *.mod.c
 *.mod.o
 *.cmd
+*.d
+*.dwo
 Module.symvers
 modules.order
 .tmp_versions/
